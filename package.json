@@ -1,13 +1,11 @@
 {
   "name": "ai-ikattu",
   "version": "1.0.0",
-  "type": "module",
   "main": "dist/main/main.js",
   "scripts": {
     "start": "electron .",
-    "build": "tsc && node --loader ts-node/esm scripts/copyFiles.ts",
-    "dev": "tsc && node --loader ts-node/esm scripts/copyFiles.ts && electron .",
-    "tsc": "tsc"
+    "build": "tsc && tsc --project src/main/tsconfig.json && node scripts/copyFiles.ts",
+    "dev": "npm run build && cross-env NODE_ENV=development electron ."
   },
   "keywords": [],
   "author": "",
@@ -15,15 +13,21 @@
   "description": "",
   "devDependencies": {
     "@types/dotenv": "^6.1.1",
+    "@types/electron": "^1.4.38",
+    "@types/fs-extra": "^11.0.4",
     "@types/node": "^22.7.7",
-    "@types/react": "^18.3.11",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "cross-env": "^7.0.3",
     "electron": "^33.0.1",
     "electron-builder": "^25.1.8",
+    "fs-extra": "^11.2.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.3"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.29.2",
+    "@electron/remote": "^2.1.2",
     "@google-cloud/local-auth": "^3.0.1",
     "@monaco-editor/react": "^4.6.0",
     "@octokit/rest": "^21.0.2",
@@ -32,7 +36,7 @@
     "electron-store": "^10.0.0",
     "googleapis": "^144.0.0",
     "monaco-editor": "^0.52.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
   }
 }

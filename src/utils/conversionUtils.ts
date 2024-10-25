@@ -1,8 +1,7 @@
 import { google } from 'googleapis';
 import { GoogleAuth } from 'google-auth-library';
 import { Anthropic } from '@anthropic-ai/sdk';
-//import { Octokit } from '@octokit/rest';
-import { Settings } from '../shared/types';
+import { UserSettings } from '../main/userSettings';
 
 interface DriveFile {
   id: string;
@@ -51,8 +50,8 @@ async function downloadFile(fileId: string, auth: GoogleAuth): Promise<Buffer> {
   return Buffer.from(res.data as ArrayBuffer);
 }
 
-async function convertToNextJS(fileContent: Buffer, fileName: string, aiMessage: string, anthropicApiKey: string): Promise<string> {
-  const anthropic = new Anthropic({ apiKey: anthropicApiKey });
+async function convertToNextJS(fileContent: Buffer, fileName: string, userSettings: UserSettings): Promise<string> {
+  const anthropic = new Anthropic({ apiKey: userSettings.anthropicKey });
   const base64Content = fileContent.toString('base64');
   const mimeType = getImageMimeType(fileContent);
 
@@ -65,13 +64,13 @@ async function convertToNextJS(fileContent: Buffer, fileName: string, aiMessage:
         content: [
           {
             type: "text",
-            text: `${aiMessage}\n\nファイル名: ${fileName}\n\n上記の内容を元に、Next.js + React + TypeScriptのコンポーネントを生成してください。`
+            text: `${userSettings.aiMessage}\n\nファイル名: ${fileName}\n\n上記の内容を元に、Next.js + React + TypeScriptのコンポーネントを生成してください。`
           },
           {
             type: "image",
             source: {
               type: "base64",
-              media_type:  mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+              media_type: mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
               data: base64Content
             }
           }
@@ -99,7 +98,6 @@ function getImageMimeType(buffer: Buffer): string {
     }
   }
 
-  // テキストファイルの場合
   if (buffer.toString().trim().length > 0) {
     return 'text/plain';
   }
@@ -107,37 +105,37 @@ function getImageMimeType(buffer: Buffer): string {
   return 'application/octet-stream';
 }
 
-async function pushToGitHub(repoName: string, filePath: string, content: string, settings: Settings): Promise<void> {
+async function pushToGitHub(repoName: string, filePath: string, content: string, userSettings: UserSettings): Promise<void> {
   const { Octokit } = await import('@octokit/rest');
-  const octokit = new Octokit({ auth: settings.githubToken });
+  const octokit = new Octokit({ auth: userSettings.githubToken });
 
   try {
     const { data: repo } = await octokit.repos.get({
-      owner: settings.githubOwner,
+      owner: userSettings.githubOwner,
       repo: repoName,
     });
 
     const { data: reference } = await octokit.git.getRef({
-      owner: settings.githubOwner,
+      owner: userSettings.githubOwner,
       repo: repoName,
       ref: `heads/${repo.default_branch}`,
     });
 
     const { data: commit } = await octokit.git.getCommit({
-      owner: settings.githubOwner,
+      owner: userSettings.githubOwner,
       repo: repoName,
       commit_sha: reference.object.sha,
     });
 
     const { data: blobData } = await octokit.git.createBlob({
-      owner: settings.githubOwner,
+      owner: userSettings.githubOwner,
       repo: repoName,
       content: Buffer.from(content).toString('base64'),
       encoding: 'base64',
     });
 
     const { data: tree } = await octokit.git.createTree({
-      owner: settings.githubOwner,
+      owner: userSettings.githubOwner,
       repo: repoName,
       base_tree: commit.tree.sha,
       tree: [
@@ -151,7 +149,7 @@ async function pushToGitHub(repoName: string, filePath: string, content: string,
     });
 
     const { data: newCommit } = await octokit.git.createCommit({
-      owner: settings.githubOwner,
+      owner: userSettings.githubOwner,
       repo: repoName,
       message: `Add ${filePath}`,
       tree: tree.sha,
@@ -159,7 +157,7 @@ async function pushToGitHub(repoName: string, filePath: string, content: string,
     });
 
     await octokit.git.updateRef({
-      owner: settings.githubOwner,
+      owner: userSettings.githubOwner,
       repo: repoName,
       ref: `heads/${repo.default_branch}`,
       sha: newCommit.sha,
@@ -172,20 +170,15 @@ async function pushToGitHub(repoName: string, filePath: string, content: string,
   }
 }
 
-export async function convertFiles(
-  folderId: string,
-  repoName: string,
-  repoDir: string,
-  aiMessage: string,
-  settings: Settings,
-  logCallback: (message: string) => void
-): Promise<void> {
+export async function convertFiles(logCallback: (message: string) => void): Promise<void> {
+  const userSettings = UserSettings.getInstance();
+  
   const auth = new GoogleAuth({
-    credentials: JSON.parse(settings.driveCredentials),
+    credentials: JSON.parse(userSettings.driveCredentials),
     scopes: ['https://www.googleapis.com/auth/drive.readonly'],
   });
 
-  const files = await listAllFiles(folderId, auth);
+  const files = await listAllFiles(userSettings.folderId, auth);
   logCallback(`処理対象のファイルが${files.length}個見つかりました。`);
 
   for (const file of files) {
@@ -199,11 +192,11 @@ export async function convertFiles(
         continue;
       }
 
-      const nextjsCode = await convertToNextJS(fileContent, file.name, aiMessage, settings.anthropicKey);
+      const nextjsCode = await convertToNextJS(fileContent, file.name, userSettings);
       const fileName = `${file.name.split('.')[0]}.tsx`;
-      const filePath = `${repoDir}/${fileName}`;
+      const filePath = `${userSettings.repoDir}/${fileName}`;
 
-      await pushToGitHub(repoName, filePath, nextjsCode, settings);
+      await pushToGitHub(userSettings.repoName, filePath, nextjsCode, userSettings);
       logCallback(`${fileName}の処理が完了し、GitHubにプッシュされました。`);
     } catch (error) {
       logCallback(`${file.name}の処理中にエラーが発生しました: ${(error as Error).message}`);

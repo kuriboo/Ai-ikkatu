@@ -1,36 +1,48 @@
-export class LogViewer {
-  private container: HTMLElement;
-  private logContainer: HTMLElement = document.createElement('div'); // 初期化を追加
+const React = window.React;  // グローバルReactを使用
+const { useEffect, useRef } = React;
 
-  constructor(container: HTMLElement) {
-      this.container = container;
-      this.createLogViewer();
-      this.attachEventListeners();
-  }
-
-  private createLogViewer() {
-      this.container.innerHTML = `
-          <div class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
-              <h2 class="text-xl font-bold mb-4">ログ</h2>
-              <div id="logContainer" class="bg-gray-100 p-4 h-64 overflow-y-auto"></div>
-          </div>
-      `;
-      this.logContainer = this.container.querySelector('#logContainer') as HTMLElement;
-  }
-
-  private attachEventListeners() {
-      // ここでグローバルイベントリスナーを設定できます（必要な場合）
-  }
-
-  public addLog(message: string) {
-      const logEntry = document.createElement('p');
-      logEntry.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
-      logEntry.className = 'mb-2';
-      this.logContainer.appendChild(logEntry);
-      this.logContainer.scrollTop = this.logContainer.scrollHeight;
-  }
-
-  public clearLogs() {
-      this.logContainer.innerHTML = '';
-  }
+interface LogViewerProps {
+    logs: string[];
 }
+
+export const LogViewer: React.FC<LogViewerProps> = ({ logs }) => {
+    const logContainerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        // 新しいログが追加されたら自動スクロール
+        if (logContainerRef.current) {
+            logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+        }
+    }, [logs]);
+
+    // ログメッセージにタイムスタンプを追加
+    const getFormattedLog = (message: string) => {
+        const timestamp = new Date().toLocaleTimeString();
+        return `[${timestamp}] ${message}`;
+    };
+
+    return (
+        <div className="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+            <h2 className="text-xl font-bold mb-4">実行ログ</h2>
+            <div
+                ref={logContainerRef}
+                className="bg-gray-100 p-4 rounded-lg h-96 overflow-y-auto font-mono text-sm"
+            >
+                {logs.length === 0 ? (
+                    <div className="text-gray-500 text-center">
+                        ログはまだありません
+                    </div>
+                ) : (
+                    logs.map((log, index) => (
+                        <div
+                            key={index}
+                            className="py-1 border-b border-gray-200 last:border-b-0"
+                        >
+                            {getFormattedLog(log)}
+                        </div>
+                    ))
+                )}
+            </div>
+        </div>
+    );
+};

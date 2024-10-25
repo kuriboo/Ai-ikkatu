@@ -10,6 +10,7 @@
     "sourceMap": true,
     "allowJs": true,
     "resolveJsonModule": true,
+    "skipLibCheck": true,
     "outDir": "dist",
     "rootDir": "src",
     "baseUrl": "src",
@@ -17,12 +18,16 @@
       "*": ["../node_modules/*"]
     },
     "typeRoots": [
-      "./node_modules/@types"
+      "./node_modules/@types",
+      "./src/renderer/types",
+      "./src/types"
     ],
-    "types": ["node"]
+    "types": ["node", "react", "react-dom"],
+    "lib": ["DOM", "DOM.Iterable", "ESNext"]  // この設定も重要
   },
   "include": [
-    "src/**/*"
+    "src/**/*",
+    "src/types/*.d.ts"
   ],
   "exclude": [
     "node_modules",

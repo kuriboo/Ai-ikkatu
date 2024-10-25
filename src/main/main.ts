@@ -1,161 +1,135 @@
-// @ts-nocheck
+const { app, BrowserWindow, ipcMain } = require('electron');
+const path = require('path');
+const dotenv = require('dotenv');
+const { UserSettings } = require('./userSettings');
 
-import { app, BrowserWindow, ipcMain, IpcMainInvokeEvent } from 'electron';
-import * as path from 'path';
-import * as fs from 'fs/promises';
-import * as crypto from 'crypto';
-//import { convertFiles } from './conversionUtils';
-import { Settings } from '../shared/types';
-import { fileURLToPath } from 'url';
-import * as dotenv from 'dotenv';
+// 型定義
+type MainWindow = {
+    window: Electron.BrowserWindow | null;
+};
+
+// メインウィンドウの参照をオブジェクトとして保持
+const mainWindow: MainWindow = {
+    window: null
+};
+
+const IPC_CHANNELS = {
+    LOAD_SETTINGS: 'load-settings',
+    SAVE_SETTINGS: 'save-settings',
+    START_CONVERSION: 'start-conversion',
+    LOG_MESSAGE: 'log-message',
+    CONVERSION_COMPLETE: 'conversion-complete',
+    CONVERSION_ERROR: 'conversion-error'
+} as const;
 
 // 環境変数の読み込み
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// UserSettingsのシングルトンインスタンス取得
+const userSettings = UserSettings.getInstance();
+userSettings.loadFromEnv();
 
 // 開発環境かどうかの判定
 const isDev = process.env.NODE_ENV !== 'production';
 
-let convertFiles: any;
+function createWindow(): void {
+  
+    mainWindow.window = new BrowserWindow({
+        width: 1200,
+        height: 800,
+        frame: false,  // ネイティブのタイトルバーを非表示
+        webPreferences: {
+            preload: path.join(__dirname, './preload.js'),
+            contextIsolation: true,
+            nodeIntegration: true
+        }
+    });
 
-// 暗号化キーの設定
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
-if (!ENCRYPTION_KEY) {
-  console.error('ENCRYPTION_KEYが設定されていません。.envファイルを確認してください。');
-  app.quit();
+    // ウィンドウコントロールのイベントハンドラー
+    ipcMain.on('window-control', (_event, command) => {
+      switch (command) {
+          case 'minimize':
+              mainWindow.window?.minimize();
+              break;
+          case 'maximize':
+              if (mainWindow.window?.isMaximized()) {
+                  mainWindow.window?.unmaximize();
+              } else {
+                  mainWindow.window?.maximize();
+              }
+              break;
+          case 'close':
+              mainWindow.window?.close();
+              break;
+      }
+    });
+
+    if (isDev) {
+        mainWindow.window.webContents.openDevTools();
+    }
+
+    const htmlPath = path.join(__dirname, '../renderer/index.html');
+    console.log('Loading HTML from:', htmlPath);
+
+    mainWindow.window.loadFile(htmlPath).catch((err) => {
+        console.error('Failed to load HTML:', err);
+    });
+
+    mainWindow.window.on('ready-to-show', () => {
+        mainWindow.window?.show();
+    });
+
+    mainWindow.window.on('closed', () => {
+        mainWindow.window = null;
+    });
 }
 
-// 設定ファイルのパス
-const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.enc');
-
-// メインウィンドウの参照
-let mainWindow: BrowserWindow | null = null;
-
-// ウィンドウの作成関数
-function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  });
-
-  if (process.env.NODE_ENV === 'development') {
-    mainWindow.loadURL(`http://localhost:${process.env.PORT || 3000}`);
-    mainWindow.webContents.openDevTools();
-  } else {
-    const htmlPath = path.join(__dirname, '..', 'renderer', 'index.html');
-    console.log('Loading HTML from:', htmlPath);  // デバッグ用
-    mainWindow.loadFile(htmlPath);
-  }
-
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show();
-  });
-
-  /*mainWindow.on('closed', () => {
-    mainWindow = null;
-  });*/
-}
-
-// アプリの準備ができたらウィンドウを作成
-app.whenReady().then(() => {
-  createWindow();
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
-  });
+// IPC通信ハンドラー
+ipcMain.handle(IPC_CHANNELS.LOAD_SETTINGS, async () => {
+    return userSettings.toJson();
 });
 
-// 全てのウィンドウが閉じられたらアプリを終了
+ipcMain.handle(IPC_CHANNELS.SAVE_SETTINGS, async (_event: Electron.IpcMainInvokeEvent, settings: typeof UserSettings) => {
+    try {
+        userSettings.updateFromJson(settings);
+        userSettings.saveToEnv();
+        return true;
+    } catch (error) {
+        console.error('Failed to save settings:', error);
+        return false;
+    }
+});
+
+ipcMain.handle(IPC_CHANNELS.START_CONVERSION, async () => {
+    try {
+        const logCallback = (message: string) => {
+            mainWindow.window?.webContents.send(IPC_CHANNELS.LOG_MESSAGE, message);
+        };
+
+        await require('../utils/conversionUtils').convertFiles(logCallback);
+        mainWindow.window?.webContents.send(IPC_CHANNELS.CONVERSION_COMPLETE);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        mainWindow.window?.webContents.send(IPC_CHANNELS.CONVERSION_ERROR, errorMessage);
+        throw error;
+    }
+});
+
+app.whenReady().then(createWindow);
+
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+    if (process.platform !== 'darwin') {
+        app.quit();
+    }
 });
 
-// 暗号化関数
-function encrypt(text: string): string {
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY!), iv);
-  let encrypted = cipher.update(text);
-  encrypted = Buffer.concat([encrypted, cipher.final()]);
-  return iv.toString('hex') + ':' + encrypted.toString('hex');
-}
-
-// 復号化関数
-function decrypt(text: string): string {
-  const textParts = text.split(':');
-  const iv = Buffer.from(textParts.shift()!, 'hex');
-  const encryptedText = Buffer.from(textParts.join(':'), 'hex');
-  const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY!), iv);
-  let decrypted = decipher.update(encryptedText);
-  decrypted = Buffer.concat([decrypted, decipher.final()]);
-  return decrypted.toString();
-}
-
-// 設定の保存
-ipcMain.handle('save-settings', async ( event: IpcMainInvokeEvent, settings: Settings ) => {
-  try {
-    const encryptedSettings = encrypt(JSON.stringify(settings));
-    await fs.writeFile(SETTINGS_FILE, encryptedSettings);
-    return true;
-  } catch (error) {
-    console.error('設定の保存に失敗しました:', error);
-    return false;
-  }
+app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+    }
 });
 
-// 設定の読み込み
-ipcMain.handle('load-settings', async () => {
-  try {
-    const encryptedSettings = await fs.readFile(SETTINGS_FILE, 'utf8');
-    const decryptedSettings = decrypt(encryptedSettings);
-    return JSON.parse(decryptedSettings) as Settings;
-  } catch (error) {
-    console.error('設定の読み込みに失敗しました:', error);
-    return {} as Settings;
-  }
-});
-
-// ファイル変換プロセス
-ipcMain.handle('start-conversion', async ( event: IpcMainInvokeEvent, data: { folderId: string, repoName: string, repoDir: string, aiMessage: string }) => {
-  try {
-    const { folderId, repoName, repoDir, aiMessage } = data;
-    const encryptedSettings = await fs.readFile(SETTINGS_FILE, 'utf8');
-    const settings: Settings = JSON.parse(decrypt(encryptedSettings));
-
-    const logCallback = (message: string) => {
-      mainWindow?.webContents.send('log-message', message);
-    };
-
-    const conversionUtils = await import('./conversionUtils');
-    convertFiles = conversionUtils.convertFiles;
-
-    await convertFiles(folderId, repoName, repoDir, aiMessage, settings, logCallback);
-
-    mainWindow?.webContents.send('conversion-complete');
-  } catch (error) {
-    console.error('変換プロセス中にエラーが発生しました:', error);
-    mainWindow?.webContents.send('conversion-error', (error as Error).message);
-    throw error;
-  }
-});
-
-// エラーハンドリング
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
-  // エラーログの保存やユーザーへの通知を行うことができます
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  // エラーログの保存やユーザーへの通知を行うことができます
-});
+module.exports = {
+    createWindow,
+    IPC_CHANNELS
+};

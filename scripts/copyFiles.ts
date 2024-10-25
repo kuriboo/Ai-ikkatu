@@ -1,28 +1,25 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import { fileURLToPath } from 'url';
+const fs = require('fs');
+const path = require('path');
 
-// ESMでの__dirnameの代替
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// プロジェクトのルートディレクトリを取得
 const rootDir = path.resolve(__dirname, '..');
 
-// ソースとビルド先のベースディレクトリを設定
-const srcDir = path.join(rootDir, 'src');
-const distDir = path.join(rootDir, 'dist');
-
-// ディレクトリ存在確認関数
-function ensureDirectoryExists(dir: string): void {
+/**
+ * ディレクトリが存在することを確認し、必要に応じて作成する
+ * @param {string} dir - 作成するディレクトリのパス
+ */
+function ensureDirectoryExists(dir) {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
         console.log(`Created directory: ${dir}`);
     }
 }
 
-// ファイルコピー関数
-function copyFile(src: string, dest: string): void {
+/**
+ * ファイルをコピーする
+ * @param {string} src - コピー元のファイルパス
+ * @param {string} dest - コピー先のファイルパス
+ */
+function copyFile(src, dest) {
     try {
         ensureDirectoryExists(path.dirname(dest));
         fs.copyFileSync(src, dest);
@@ -33,27 +30,54 @@ function copyFile(src: string, dest: string): void {
     }
 }
 
-// メイン処理
-async function main(): Promise<void> {
+/**
+ * Reactの依存ファイルをコピーする
+ */
+function copyReactFiles() {
+    // コピー先のnode_modulesディレクトリを作成
+    const nodeModulesDir = path.join(rootDir, 'dist', 'renderer', 'node_modules');
+    
+    // React関連のディレクトリを作成
+    ensureDirectoryExists(path.join(nodeModulesDir, 'react'));
+    ensureDirectoryExists(path.join(nodeModulesDir, 'react-dom'));
+
+    // React Core (UMD)
+    copyFile(
+        path.join(rootDir, 'node_modules', 'react', 'umd', 'react.development.js'),
+        path.join(nodeModulesDir, 'react', 'index.js')
+    );
+
+    // React DOM (UMD)
+    copyFile(
+        path.join(rootDir, 'node_modules', 'react-dom', 'umd', 'react-dom.development.js'),
+        path.join(nodeModulesDir, 'react-dom', 'index.js')
+    );
+
+    console.log('React files copied successfully');
+
+}
+
+/**
+ * メイン処理
+ */
+async function main() {
     try {
-        // パス設定（tsconfig.jsonのrootDir: srcに合わせた構造）
-        const srcPath = path.join(srcDir, 'renderer', 'index.html');
-        const destPath = path.join(distDir, 'renderer', 'index.html');
+        // HTMLファイルのコピー
+        copyFile(
+            path.join(rootDir, 'src', 'renderer', 'index.html'),
+            path.join(rootDir, 'dist', 'renderer', 'index.html')
+        );
 
-        console.log('Source path:', srcPath);
-        console.log('Destination path:', destPath);
+        // Reactファイルのコピー
+        copyReactFiles();
 
-        // ファイルのコピー
-        copyFile(srcPath, destPath);
-
-        console.log('File copied successfully!');
+        console.log('File operations completed successfully!');
     } catch (err) {
-        console.error('Error occurred while copying files:', err);
+        console.error('Error during file operations:', err);
         process.exit(1);
     }
 }
 
-// スクリプトの実行
 main().catch(err => {
     console.error('Unhandled error:', err);
     process.exit(1);
